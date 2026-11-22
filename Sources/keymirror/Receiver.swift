@@ -73,7 +73,7 @@ private func serveConnection(_ fd: Int32) {
 }
 
 /// Accept loop, run on a background thread until stopped.
-private func receiverAcceptLoop(secret: String) {
+private func receiverAcceptLoop(secret: String, myName: String) {
     while gReceiverRunning.value {
         let conn: (fd: Int32, peer: String)
         do {
@@ -85,7 +85,7 @@ private func receiverAcceptLoop(secret: String) {
             break   // listen fd was closed by stopReceiver, or a real error
         }
 
-        setRecvTimeout(conn.fd, seconds: 5)  // bound the handshake
+        setRecvTimeout(conn.fd, seconds: 5)  // bound the handshake + hello
         do {
             try serverHandshake(fd: conn.fd, secret: secret)
         } catch {
@@ -93,15 +93,18 @@ private func receiverAcceptLoop(secret: String) {
             close(conn.fd)
             continue
         }
+        let senderName = exchangeHello(fd: conn.fd, myName: myName) ?? conn.peer
         gStatus.set("state", "connected")
         gStatus.set("peer", conn.peer)
-        fputs("✓ sender authenticated: \(conn.peer)\n", stderr)
+        gStatus.set("peerName", senderName)
+        fputs("✓ sender connected: \"\(senderName)\" (\(conn.peer))\n", stderr)
 
         serveConnection(conn.fd)
         close(conn.fd)
         if gReceiverRunning.value {
             gStatus.set("state", "listening")
             gStatus.set("peer", "-")
+            gStatus.set("peerName", "-")
             fputs("… sender disconnected — waiting for reconnect\n", stderr)
         }
     }
@@ -135,7 +138,7 @@ func startReceiver(port: UInt16, secret: String, name: String) -> Bool {
     gStatus.set("state", "listening")
     fputs("● listening on :\(port)  — injecting ← → ↑ ↓ space into the focused app\n", stderr)
 
-    Thread.detachNewThread { receiverAcceptLoop(secret: secret) }
+    Thread.detachNewThread { receiverAcceptLoop(secret: secret, myName: name) }
     return true
 }
 

@@ -9,7 +9,11 @@ import Security
 //   2. Sender (client) replies  AUTH  = MAGIC(3) + HMAC-SHA256(secret, nonce)(32)
 //   3. Receiver replies         1 byte: 0x01 ok / 0x00 reject, then closes on reject
 //
-// After the handshake, either side sends length-fixed framed messages:
+// Immediately after the handshake, each side sends a HELLO naming itself, then
+// reads the peer's HELLO — so both ends know the other's friendly name:
+//   HELLO = 0x48 + uint16 BE length + UTF-8 name
+//
+// After that, either side sends length-fixed framed messages:
 //   KEY  = 0x4B + [keyCode, down(1)/up(0), isRepeat(1/0)]      (sender → receiver)
 //   PING = 0x50 + uint64 BE timestamp (sender monotonic nanos) (sender → receiver)
 //   PONG = 0x51 + the same uint64 echoed back                  (receiver → sender)
@@ -17,8 +21,9 @@ import Security
 // The HMAC challenge-response means the shared secret never crosses the wire,
 // and a replayed AUTH can't be reused against a fresh nonce.
 
-let protoMagic: [UInt8] = [0x4B, 0x4D, 0x32]  // "KM2" — bump the last byte on protocol changes
+let protoMagic: [UInt8] = [0x4B, 0x4D, 0x33]  // "KM3" — bump the last byte on protocol changes
 
+let msgHello: UInt8 = 0x48  // 'H'
 let msgKey:  UInt8 = 0x4B  // 'K'
 let msgPing: UInt8 = 0x50  // 'P'
 let msgPong: UInt8 = 0x51  // 'Q'
@@ -87,6 +92,29 @@ func clientHandshake(fd: Int32, secret: String) throws {
     guard result[0] == authOK else {
         throw NetError.message("handshake: rejected — shared secret mismatch")
     }
+}
+
+// MARK: - Name exchange
+
+/// Send our name, then read and return the peer's name. Call on both sides
+/// right after a successful handshake. Returns nil if the peer didn't send a
+/// well-formed HELLO (older/other software) — not fatal.
+func exchangeHello(fd: Int32, myName: String) -> String? {
+    let nameBytes = Array(myName.utf8).prefix(1024)
+    let len = UInt16(nameBytes.count)
+    var frame: [UInt8] = [msgHello, UInt8(len >> 8), UInt8(len & 0xff)]
+    frame += nameBytes
+    _ = writeAll(fd, &frame, frame.count)
+
+    var t = [UInt8](repeating: 0, count: 1)
+    guard readFull(fd, &t, 1) == .ok, t[0] == msgHello else { return nil }
+    var l = [UInt8](repeating: 0, count: 2)
+    guard readFull(fd, &l, 2) == .ok else { return nil }
+    let n = Int(l[0]) << 8 | Int(l[1])
+    if n == 0 { return "" }
+    var buf = [UInt8](repeating: 0, count: n)
+    guard readFull(fd, &buf, n) == .ok else { return nil }
+    return String(bytes: buf, encoding: .utf8)
 }
 
 /// Receiver side: challenge the client and verify its MAC. Throws on failure.

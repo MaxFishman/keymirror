@@ -51,10 +51,14 @@ A **⌨ icon** appears in the menu bar. Its menu lets you:
 
 - pick a **mode** — *Off*, *Sender* (this Mac controls the other), or
   *Receiver* (this Mac is controlled);
-- see **live status** — state, peer, latency, key counts;
+- see **Devices** — this Mac's name, the connected peer **by name** (● = live),
+  and other receivers discovered on the LAN (○);
+- see **live status** — state, latency, key counts;
 - **pause forwarding** (sender), also ⌃⌥⌘P;
 - edit the **shared secret / name / host / port** in Preferences;
-- grant **Accessibility / Input Monitoring** via one-click shortcuts;
+- a **Permissions** submenu with live ✅/⛔️ status for Accessibility, Input
+  Monitoring, and Local Network, each a one-click grant (plus a prominent
+  "Fix permissions" item whenever something's missing);
 - toggle **Launch at Login**.
 
 Set the same shared secret on both Macs (Preferences), choose *Receiver* on one

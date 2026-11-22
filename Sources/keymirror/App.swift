@@ -79,18 +79,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let state = (s["state"] as? String) ?? "idle"
         add(header: "keymirror \(Updater.shared.currentVersion())")
         add(info: "State:  \(state)")
-        if let peer = s["peer"] as? String, peer != "-" {
-            add(info: "Peer:   \(peer)")
-        }
         if let rtt = s["rttMs"] as? Double, rtt >= 0 {
             add(info: String(format: "Latency: %.2f ms", rtt))
         }
-        if role == .send, let sent = s["keysSent"] as? Int {
+        if role == .send, let sent = s["keysSent"] as? Int, sent > 0 {
             add(info: "Keys sent: \(sent)")
         }
-        if role == .recv, let inj = s["keysInjected"] as? Int {
+        if role == .recv, let inj = s["keysInjected"] as? Int, inj > 0 {
             add(info: "Keys injected: \(inj)")
         }
+
+        // Devices.
+        menu.addItem(.separator())
+        add(info: "Devices")
+        add(info: "   This Mac — \(settings(from: Config.load()).name)")
+        addDeviceRows(role: role, status: s, state: state)
         menu.addItem(.separator())
 
         // Mode selection (radio-style checkmarks).
@@ -106,20 +109,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(.separator())
 
-        // Permission onboarding.
-        if !isTrustedForAccessibility(prompt: false) {
-            let warn = NSMenuItem(title: "⚠ Grant Accessibility permission…",
-                                  action: #selector(openAccessibility), keyEquivalent: "")
-            warn.target = self
-            menu.addItem(warn)
-            if role == .send {
-                let im = NSMenuItem(title: "⚠ Grant Input Monitoring permission…",
-                                    action: #selector(openInputMonitoring), keyEquivalent: "")
-                im.target = self
-                menu.addItem(im)
-            }
-            menu.addItem(.separator())
+        // Permissions — a prominent fix item when something's missing, plus a
+        // submenu with live status and one-click grants. For Off, show what
+        // both roles need so you can pre-grant.
+        let missing = missingPermissions(for: role == .off ? .send : role)
+        if !missing.isEmpty {
+            let fix = NSMenuItem(title: "⚠️ Fix permissions: \(missing.joined(separator: ", "))…",
+                                 action: #selector(fixAllPermissions), keyEquivalent: "")
+            fix.target = self
+            menu.addItem(fix)
         }
+        let permItem = NSMenuItem(title: "Permissions", action: nil, keyEquivalent: "")
+        permItem.submenu = buildPermissionsSubmenu(role: role)
+        menu.addItem(permItem)
+        menu.addItem(.separator())
 
         // Preferences + login.
         let prefs = NSMenuItem(title: "Preferences…", action: #selector(showPreferences), keyEquivalent: ",")
@@ -168,6 +171,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(item)
     }
 
+    /// Device rows: ● = connected, ○ = available/idle.
+    private func addDeviceRows(role: Role, status s: [String: Any], state: String) {
+        let peer = (s["peer"] as? String) ?? "-"
+        let peerName = (s["peerName"] as? String) ?? "-"
+        let connected = state == "connected"
+        let label = peerName != "-" ? peerName : (peer != "-" ? peer : "receiver")
+
+        switch role {
+        case .off:
+            add(info: "   (choose Sender or Receiver below)")
+        case .recv:
+            add(info: connected ? "   ● \(label) — sender" : "   ○ waiting for a sender…")
+        case .send:
+            if let devices = gSenderRegistry?.all() {   // auto-discovery mode
+                if devices.isEmpty {
+                    add(info: connected ? "   ● \(label) — receiver" : "   ○ searching for receivers…")
+                } else {
+                    for d in devices {
+                        let isConn = connected && peer.hasPrefix(d.host + ":")
+                        add(info: "   \(isConn ? "●" : "○") \(d.name) — \(d.host)")
+                    }
+                }
+            } else {                                     // fixed host, no discovery
+                add(info: connected ? "   ● \(label) — receiver" : "   ○ connecting…")
+            }
+        }
+    }
+
     // MARK: Mode actions
 
     private func startRole(_ role: Role) {
@@ -206,17 +237,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: Permissions
 
-    @objc private func openAccessibility() {
-        _ = isTrustedForAccessibility(prompt: true)
-        openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
+    private func buildPermissionsSubmenu(role: Role) -> NSMenu {
+        let m = NSMenu()
+
+        let ax = accessibilityState()
+        let axItem = NSMenuItem(
+            title: "\(permGlyph(ax)) Accessibility\(ax == .granted ? "  (granted)" : " — click to grant")",
+            action: #selector(fixAccessibility), keyEquivalent: "")
+        axItem.target = self
+        m.addItem(axItem)
+
+        let im = inputMonitoringState()
+        let imItem = NSMenuItem(
+            title: "\(permGlyph(im)) Input Monitoring\(im == .granted ? "  (granted)" : " — sender only · click to grant")",
+            action: #selector(fixInputMonitoring), keyEquivalent: "")
+        imItem.target = self
+        m.addItem(imItem)
+
+        let lnItem = NSMenuItem(title: "📡 Local Network — open settings…",
+                                action: #selector(fixLocalNetwork), keyEquivalent: "")
+        lnItem.target = self
+        m.addItem(lnItem)
+
+        m.addItem(.separator())
+        let all = NSMenuItem(title: "Grant everything needed…",
+                             action: #selector(fixAllPermissions), keyEquivalent: "")
+        all.target = self
+        m.addItem(all)
+        return m
     }
 
-    @objc private func openInputMonitoring() {
-        openSettings("x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent")
-    }
+    @objc private func fixAccessibility() { promptAccessibility(); openAccessibilityPane() }
+    @objc private func fixInputMonitoring() { promptInputMonitoring(); openInputMonitoringPane() }
+    @objc private func fixLocalNetwork() { openLocalNetworkPane() }
 
-    private func openSettings(_ urlString: String) {
-        if let url = URL(string: urlString) { NSWorkspace.shared.open(url) }
+    @objc private func fixAllPermissions() {
+        promptAccessibility()
+        promptInputMonitoring()
+        openAccessibilityPane()
     }
 
     // MARK: Preferences

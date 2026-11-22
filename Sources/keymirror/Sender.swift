@@ -91,6 +91,9 @@ final class AtomicBool {
 // context) and shared across the sender's threads.
 let gLink = LinkManager()
 let gSenderRunning = AtomicBool(false)
+/// Discovered receivers (set while the sender is auto-discovering); read by the
+/// Devices menu. Nil when a fixed --host is used or the sender is off.
+var gSenderRegistry: PeerRegistry?
 private var gTap: CFMachPort?
 private var gTapSource: CFRunLoopSource?
 private var gPingTimer: DispatchSourceTimer?
@@ -150,7 +153,7 @@ private func resolveTarget(hostOpt: String?, port: UInt16,
 /// Connection thread: resolve target, connect, authenticate, consume PONGs,
 /// reconnect until stopped.
 private func senderConnectionLoop(hostOpt: String?, port: UInt16, secret: String,
-                                  registry: PeerRegistry?) {
+                                  myName: String, registry: PeerRegistry?) {
     var backoff: UInt32 = 1
     while gSenderRunning.value {
         guard let target = resolveTarget(hostOpt: hostOpt, port: port, registry: registry) else { break }
@@ -160,11 +163,13 @@ private func senderConnectionLoop(hostOpt: String?, port: UInt16, secret: String
             let fd = try connectTCP(host: target.host, port: target.port)
             setRecvTimeout(fd, seconds: 5)          // bound the handshake
             try clientHandshake(fd: fd, secret: secret)
+            let peerName = exchangeHello(fd: fd, myName: myName) ?? target.host
+            gStatus.set("peerName", peerName)
             setRecvTimeout(fd, seconds: 0)          // blocking reads afterwards
             gLink.install(fd)
             backoff = 1
             gStatus.set("state", "connected")
-            fputs("✓ connected + authenticated → \(target.host):\(target.port)\n", stderr)
+            fputs("✓ connected to \"\(peerName)\" (\(target.host):\(target.port))\n", stderr)
 
             // Read PONGs until the link drops.
             var type = [UInt8](repeating: 0, count: 1)
@@ -184,6 +189,7 @@ private func senderConnectionLoop(hostOpt: String?, port: UInt16, secret: String
             if old >= 0 { close(old) }
             gStatus.set("state", "reconnecting")
             gStatus.set("rttMs", -1)
+            gStatus.set("peerName", "-")
             fputs("… link down — reconnecting\n", stderr)
         } catch {
             gStatus.set("state", "reconnecting")
@@ -239,6 +245,8 @@ func startSender(host: String?, port: UInt16, secret: String, preferName: String
     CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
     CGEvent.tapEnable(tap: tap, enable: true)
 
+    let myName = preferName ?? defaultName()
+
     // Auto-discovery when no fixed host is given.
     var registry: PeerRegistry? = nil
     if host == nil {
@@ -247,12 +255,14 @@ func startSender(host: String?, port: UInt16, secret: String, preferName: String
         gBrowser = BonjourBrowser(registry: reg)
         gBrowser?.start()
         registry = reg
+        gSenderRegistry = reg
         fputs("🔍 no host set — auto-discovering a receiver via Bonjour…\n", stderr)
     }
 
     // Background connection/reconnection thread.
     Thread.detachNewThread {
-        senderConnectionLoop(hostOpt: host, port: port, secret: secret, registry: registry)
+        senderConnectionLoop(hostOpt: host, port: port, secret: secret,
+                             myName: myName, registry: registry)
     }
 
     // Heartbeat / latency timer (PING every 1s).
@@ -310,8 +320,10 @@ func stopSender() {
 
     gBrowser?.stop()
     gBrowser = nil
+    gSenderRegistry = nil
 
     gStatus.set("state", "idle")
     gStatus.set("rttMs", -1)
     gStatus.set("peer", "-")
+    gStatus.set("peerName", "-")
 }

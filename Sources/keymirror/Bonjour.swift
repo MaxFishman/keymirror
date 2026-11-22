@@ -105,6 +105,13 @@ final class PeerRegistry {
         return nil
     }
 
+    /// All discovered receivers, sorted by name — for the Devices menu.
+    func all() -> [(name: String, host: String, port: UInt16)] {
+        lock.lock(); defer { lock.unlock() }
+        return peers.map { (name: $0.key, host: $0.value.host, port: $0.value.port) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
     /// Block up to `timeout` seconds for the peer set to change.
     func waitForChange(timeout: TimeInterval) {
         _ = changed.wait(timeout: .now() + timeout)

@@ -72,6 +72,7 @@ func resolveSecret(_ args: [String], _ cfg: Config) -> String {
 }
 
 let args = Array(CommandLine.arguments.dropFirst())
+if args.first == "__selftest" { runSelfTest() }
 let cfg = Config.load()
 
 // No subcommand (e.g. the .app bundle was opened) → run the menu-bar app.
