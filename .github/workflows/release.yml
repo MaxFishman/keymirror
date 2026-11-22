@@ -1,0 +1,41 @@
+name: Release
+
+# Push a version tag to cut a release:
+#   git tag v0.5.1 && git push origin v0.5.1
+# This builds KeyMirror.app, zips it, and publishes a GitHub Release. Installed
+# apps see the new release (via the in-app updater) and offer to update.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14        # Apple Silicon runner (arm64)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: ver
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build KeyMirror.app
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          BUILD: ${{ github.run_number }}
+        run: ./build-app.sh
+
+      - name: Zip the app bundle
+        run: ditto -c -k --keepParent dist/KeyMirror.app dist/KeyMirror.zip
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            dist/KeyMirror.zip \
+            --title "keymirror ${GITHUB_REF_NAME}" \
+            --generate-notes
