@@ -185,18 +185,22 @@ Requires the Xcode command-line tools. The CLI binary is at
 
 ## Releasing new versions
 
-Releases are automated by GitHub Actions (`.github/workflows/release.yml`). To
-ship an update that installed apps will pick up:
+Cut a release from this Mac:
 
 ```bash
-# bump the fallback version in build-app.sh if you like, then:
-git tag v0.5.1
-git push origin v0.5.1
+./release.sh 0.5.1
 ```
 
-The workflow builds `KeyMirror.app`, zips it, and publishes a GitHub Release
-named for the tag. The in-app updater compares the release's version to the
-running one and offers the update.
+This builds `KeyMirror.app` at that version, zips it, tags the commit, and
+publishes a GitHub Release. The in-app updater compares the release version to
+the running one and offers the update within a few hours (or on *Check for
+Updates*).
+
+> There's also a `.github/workflows/release.yml` that does the same in CI, but
+> GitHub-hosted **macOS runners aren't currently available to this account**
+> (`macos-14` reports "not supported"; `macos-13` jobs sit queued), so the
+> workflow is set to manual and `release.sh` is the reliable path. If you enable
+> macOS runners later, switch the workflow trigger back to `push: tags`.
 
 ### Upgrading to Developer ID (seamless updates)
 

@@ -1,13 +1,20 @@
 name: Release
 
-# Push a version tag to cut a release:
-#   git tag v0.5.1 && git push origin v0.5.1
-# This builds KeyMirror.app, zips it, and publishes a GitHub Release. Installed
-# apps see the new release (via the in-app updater) and offer to update.
+# Builds KeyMirror.app, zips it, and publishes a GitHub Release so installed
+# apps can auto-update.
+#
+# NOTE: GitHub-hosted macOS runners are not currently available to this account
+# (macos-14 reports "not supported"; macos-13 jobs sit queued). Until that's
+# resolved, cut releases locally with `./release.sh <version>` instead. This
+# workflow is kept ready and set to manual (workflow_dispatch) so it doesn't
+# fire failing/queued runs — flip it back to `push: tags` once runners work.
 
 on:
-  push:
-    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. v0.5.1)'
+        required: true
 
 permissions:
   contents: write
@@ -19,10 +26,14 @@ jobs:
     runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag }}
 
       - name: Derive version from tag
         id: ver
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+        env:
+          TAG: ${{ github.event.inputs.tag }}
 
       - name: Build KeyMirror.app (arm64)
         env:
@@ -37,8 +48,9 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" \
+          gh release create "${TAG}" \
             dist/KeyMirror.zip \
-            --title "keymirror ${GITHUB_REF_NAME}" \
+            --title "keymirror ${TAG}" \
             --generate-notes
