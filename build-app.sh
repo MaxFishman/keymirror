@@ -15,10 +15,14 @@ BUILD="${BUILD:-5}"
 
 echo "▸ compiling release binary…"
 # ARCH (optional) lets CI cross-compile, e.g. ARCH=arm64 on an Intel runner.
-ARCH_FLAGS=()
-[ -n "${ARCH:-}" ] && ARCH_FLAGS=(--arch "$ARCH")
-swift build -c release "${ARCH_FLAGS[@]}"
-BIN="$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)/keymirror"
+# Written to be safe under bash 3.2 + `set -u` with an empty arch list.
+if [ -n "${ARCH:-}" ]; then
+    swift build -c release --arch "$ARCH"
+    BIN="$(swift build -c release --arch "$ARCH" --show-bin-path)/keymirror"
+else
+    swift build -c release
+    BIN="$(swift build -c release --show-bin-path)/keymirror"
+fi
 
 APP="dist/${APP_NAME}.app"
 echo "▸ assembling ${APP}…"
