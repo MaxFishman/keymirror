@@ -125,6 +125,20 @@ resume. If that hotkey is unavailable in your environment, the sender prints a
 - The secret itself never crosses the wire: the receiver sends a random
   challenge, the sender replies with `HMAC-SHA256(secret, challenge)`.
 
+## Latency & keeping the two prompters in sync
+
+The Mac you press on reacts to the real keypress instantly; the other reacts
+after the event crosses the network. Keep that gap tiny and stable:
+
+- **Use a wired link between the two Macs.** A single Thunderbolt/USB-C cable
+  (macOS "Thunderbolt Bridge") or Ethernet gives **<1 ms, jitter-free**. This is
+  by far the biggest win — Wi-Fi can swing from a few ms to **200+ ms**, mostly
+  because the Wi-Fi radio naps between sporadic keystrokes.
+- On Wi-Fi, keymirror sends a rapid keepalive (~50 ms) to keep the radio awake,
+  which cuts that nap-induced latency a lot — but it can't match a wire.
+- Watch the **Latency** line in the ⌨ menu. Under ~2 ms is great; tens or
+  hundreds of ms means fix the network (wire it), not the app.
+
 ## Permissions (one-time, per Mac)
 
 macOS requires these for global key capture/injection. The app's menu has

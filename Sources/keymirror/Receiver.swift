@@ -138,7 +138,10 @@ func startReceiver(port: UInt16, secret: String, name: String) -> Bool {
     gStatus.set("state", "listening")
     fputs("● listening on :\(port)  — injecting ← → ↑ ↓ space into the focused app\n", stderr)
 
-    Thread.detachNewThread { receiverAcceptLoop(secret: secret, myName: name) }
+    // High priority so injection isn't delayed by scheduling jitter.
+    let t = Thread { receiverAcceptLoop(secret: secret, myName: name) }
+    t.qualityOfService = .userInteractive
+    t.start()
     return true
 }
 

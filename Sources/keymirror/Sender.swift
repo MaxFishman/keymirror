@@ -16,6 +16,11 @@ import ApplicationServices
 // All socket writes funnel through LinkManager, which serializes them under a
 // lock, so the three threads never corrupt a frame.
 
+/// How often the sender PINGs. Deliberately fast: frequent small packets keep
+/// the Wi-Fi radio out of power-save, which otherwise adds 100-200 ms of
+/// latency to sporadic keystrokes. Negligible bandwidth (~9 bytes each).
+let keepaliveInterval = 0.05
+
 /// Thread-safe owner of the current connection's fd + link stats.
 final class LinkManager {
     private let lock = NSLock()
@@ -259,16 +264,23 @@ func startSender(host: String?, port: UInt16, secret: String, preferName: String
         fputs("🔍 no host set — auto-discovering a receiver via Bonjour…\n", stderr)
     }
 
-    // Background connection/reconnection thread.
-    Thread.detachNewThread {
+    // Background connection/reconnection thread — high priority to minimize
+    // scheduling jitter on the key path.
+    let connThread = Thread {
         senderConnectionLoop(hostOpt: host, port: port, secret: secret,
                              myName: myName, registry: registry)
     }
+    connThread.qualityOfService = .userInteractive
+    connThread.start()
 
-    // Heartbeat / latency timer (PING every 1s).
-    let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global())
-    timer.schedule(deadline: .now() + 1, repeating: 1.0)
+    // Heartbeat / latency timer. We PING frequently (keepaliveInterval) so the
+    // Wi-Fi radio doesn't drop into power-save between keystrokes — on Wi-Fi
+    // that power-save nap can add 100-200 ms of latency to each sporadic packet.
+    // On a wired link this is just a cheap heartbeat.
+    let timer = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
+    timer.schedule(deadline: .now() + keepaliveInterval, repeating: keepaliveInterval, leeway: .milliseconds(5))
     var pingCount = 0
+    let pingsPerStatus = max(1, Int(2.0 / keepaliveInterval))   // log RTT ~every 2s
     timer.setEventHandler {
         guard gSenderRunning.value, gLink.isConnected() else { return }
         let ts = DispatchTime.now().uptimeNanoseconds
@@ -281,7 +293,7 @@ func startSender(host: String?, port: UInt16, secret: String, preferName: String
         }
         gStatus.set("rttMs", gLink.rttMs())
         pingCount += 1
-        if pingCount % 5 == 0 {
+        if pingCount % pingsPerStatus == 0 {
             let rtt = gLink.rttMs()
             if rtt >= 0 {
                 let suffix = gPaused ? "  (paused)" : ""

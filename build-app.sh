@@ -10,8 +10,8 @@ cd "$(dirname "$0")"
 APP_NAME="KeyMirror"
 BUNDLE_ID="org.fishman.keymirror"
 # VERSION/BUILD can be overridden by the release pipeline (from the git tag).
-VERSION="${VERSION:-0.6.0}"
-BUILD="${BUILD:-6}"
+VERSION="${VERSION:-0.7.0}"
+BUILD="${BUILD:-7}"
 
 echo "▸ compiling release binary…"
 # ARCH (optional) lets CI cross-compile, e.g. ARCH=arm64 on an Intel runner.
